@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: preflight
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/preflight}
+    username: ${SPRING_DATASOURCE_USERNAME:preflight}
+    password: ${SPRING_DATASOURCE_PASSWORD:preflight}
+  jpa:
+    # Flyway owns the schema; Hibernate only checks the entity matches it. Same
+    # arrangement as the real application, so the same failure would surface here.
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
