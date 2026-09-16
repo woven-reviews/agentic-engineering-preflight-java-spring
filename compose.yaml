@@ -2,6 +2,8 @@ name: preflight
 
 # The same images, the same bind-mount-and-run shape, and the same cache volumes as
 # the assessment stack — so a run here leaves your Maven and Bun caches warm for it.
+# `extractor` additionally builds the session-log extractor's own image, so that build
+# (base image pull + layer cache) is warm before the real session-log export needs it.
 services:
   postgres:
     image: postgres:17-alpine
@@ -60,6 +62,10 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
+
+  extractor:
+    build: ./scripts
+    command: ["extract_claude_session_log.py", "--help"]
 
 volumes:
   postgres-data:

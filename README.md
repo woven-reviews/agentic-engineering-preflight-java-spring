@@ -14,10 +14,11 @@ Run this ahead of time. If it comes up green, you're ready.
 docker compose up
 ```
 
-First run pulls the base images, downloads the Maven dependencies and installs the frontend
-packages — that's the slow part, and running it now means it's all cached when the real app
-arrives. The backend's dependency set deliberately matches the assessment's, so your `~/.m2`
-comes out of this warm rather than half-full. Subsequent runs are fast.
+First run pulls the base images, downloads the Maven dependencies, installs the frontend
+packages, and builds the session-log extractor's image — that's the slow part, and running it
+now means it's all cached when the real app (and the real export) arrives. The backend's
+dependency set deliberately matches the assessment's, so your `~/.m2` comes out of this warm
+rather than half-full. Subsequent runs are fast.
 
 Then open:
 
@@ -64,33 +65,37 @@ caches this primes are the ones you'll actually use.
 ## Exporting session logs
 
 `scripts/` has three mechanical extractors that turn an AI coding session into a readable
-markdown log (no LLM, no network — stdlib only). Run them from the repo root:
+markdown log plus a raw JSON envelope (no LLM, no network — stdlib only). They run in Docker
+(`scripts/Dockerfile`), so no local Python install is required — only Docker itself, and
+`docker compose up` above already warms the image build for you.
 
 ```bash
-python3 scripts/extract_session_log.py          # Claude Code sessions (~/.claude/projects/)
-python3 scripts/extract_codex_session_log.py    # Codex CLI sessions (~/.codex/sessions/)
-python3 scripts/extract_copilot_session_log.py  # GitHub Copilot CLI (~/.copilot/session-store.db)
+image="rfp-monster-session-log-extractor:local"
+docker build -q -t "$image" scripts >/dev/null
+mounts=(-v "$PWD:$PWD" -v /tmp:/tmp)
+[ -d "$HOME/.claude/projects" ] && mounts+=(-v "$HOME/.claude/projects:$HOME/.claude/projects:ro")
+docker run --rm -e HOME="$HOME" -u "$(id -u):$(id -g)" -w "$PWD" "${mounts[@]}" "$image" \
+  extract_claude_session_log.py --all   # or extract_codex_session_log.py / extract_copilot_session_log.py
 ```
 
-By default each writes the most recent session for the current directory to
-`session_log.md` / `codex_session_log.md` / `copilot_session_log.md` in the repo root.
+Swap the mounted session-storage directory (and script) for Codex (`~/.codex/sessions`) or
+Copilot (`~/.copilot`) — the container only gets read-only access to that one directory, plus
+read-write access to this checkout and `/tmp` (where pasted images get dumped), nothing else
+on the machine.
 
-Useful flags (all three scripts):
-
-- `--all` — one file per session (`session_log_<id>.md`, etc.).
-- `--strict` — only sessions started in *this exact directory*; skips the parent-dir walk
-  and the "newest session anywhere" fallback, so you never accidentally export an unrelated
-  project's transcript.
-- `--output DIR` — write to `DIR` instead of the repo root (or `--output -` for stdout).
-- a session id (or unique prefix) — export just that one session.
-
-Source-specific flags: the Codex extractor takes `--sessions-root DIR` and the Copilot
-extractor takes `--db PATH` to point at a non-default session store.
+Defaults to `--all`, writing two files per session: a readable `*_session_log_<id>.md` and a
+raw `*_session_log_raw_<id>.json` envelope (the markdown is unprefixed for Claude:
+`session_log_<id>.md`, since a downstream consumer matches only the `codex_`/`copilot_`
+prefixes). Useful flags (all three scripts): `--strict` (only sessions started in *this exact
+directory* — no parent-dir walk, no newest-anywhere fallback), `--output DIR` (or `--output -`
+for stdout), a session id to export just one, `--no-raw` to skip the envelope, and
+`--raw-tool-result-bytes N` to change the tool-result cap. Source-specific: Codex takes
+`--sessions-root DIR`, Copilot takes `--db PATH`.
 
 Pasted images can't be read mechanically, so the extractors dump each one to a temp file and
-leave a `[Image dumped to … — description pending]` marker in the log. The harness shortcuts
-below do a follow-up pass that replaces those markers with a short image description; running
-the scripts directly leaves the markers in place.
+leave a `[Image dumped to … — description pending]` marker in the markdown log. The harness
+shortcuts below do a follow-up pass that replaces those markers with a short image
+description; running the container directly leaves the markers in place.
 
 ### From inside your AI harness
 
@@ -106,4 +111,7 @@ Each tool ships a shortcut so you can export without leaving the session:
   `.agents/skills/extract-copilot-session-logs/`).
 
 Each shortcut runs its extractor with `--all` and passes through extra args like `--strict`
-or `--output DIR`.
+or `--output DIR`, then does the image-description pass on the markdown output.
+
+Then drag both files per session — the `.md` and the `.json` — into Qualified. The markdown
+is what gets scored; the raw envelope is what lets a human grader see images and full output.
